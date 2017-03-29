@@ -136,10 +136,14 @@ namespace {
 // don't want the table to act as a root for `leaks`.
 typedef objc::DenseMap<DisguisedPtr<objc_object>,size_t,true> RefcountMap;
 
+    // 散列表
 struct SideTable {
+    // 锁
     spinlock_t slock;
-    RefcountMap refcnts;
-    weak_table_t weak_table;
+    
+    RefcountMap refcnts; // 引用计数的 hash 表
+    
+    weak_table_t weak_table; // 全局的 weak 引用表，key： 对象地址， value 是 weak_entry_t 结构体
 
     SideTable() {
         memset(&weak_table, 0, sizeof(weak_table));
@@ -248,7 +252,7 @@ objc_storeStrong(id *location, id obj)
 }
 
 
-// Update a weak variable.
+// Update a weak variable.  更新 weak 变量
 // If HaveOld is true, the variable has an existing value 
 //   that needs to be cleaned up. This value might be nil.
 // If HaveNew is true, there is a new value that needs to be 
@@ -256,15 +260,29 @@ objc_storeStrong(id *location, id obj)
 // If CrashIfDeallocating is true, the process is halted if newObj is 
 //   deallocating or newObj's class does not support weak references. 
 //   If CrashIfDeallocating is false, nil is stored instead.
+
+
+/// return storeWeak<false/*old*/, true/*new*/, true/*crash*/> (location, (objc_object*)newObj);
+// haveOld 是否已经存在该变量 
+// haveNew 表示有一个新值 需要连接到变量
+// CrashIfDeallocating false 存储 nil ，true 表示 当 newObj 正在释放或者不支持 weak 引用时，进程停止
 template <bool HaveOld, bool HaveNew, bool CrashIfDeallocating>
 static id 
 storeWeak(id *location, objc_object *newObj)
 {
+    // haveOld 和 haveNew 必须有一个为 YES
     assert(HaveOld  ||  HaveNew);
+    
+    // 如果 haveNew 为 false，newObj 为 nil
     if (!HaveNew) assert(newObj == nil);
+    
 
     Class previouslyInitializedClass = nil;
+    
+    
     id oldObj;
+    
+    // 新旧两个散列表
     SideTable *oldTable;
     SideTable *newTable;
 
@@ -273,20 +291,27 @@ storeWeak(id *location, objc_object *newObj)
     // Retry if the old value changes underneath us.
  retry:
     if (HaveOld) {
+        // 存在 旧值
+        
         oldObj = *location;
         oldTable = &SideTables()[oldObj];
     } else {
         oldTable = nil;
     }
     if (HaveNew) {
+        // 如果是 新值
         newTable = &SideTables()[newObj];
     } else {
         newTable = nil;
     }
 
+    // 加锁
     SideTable::lockTwo<HaveOld, HaveNew>(oldTable, newTable);
 
+    
     if (HaveOld  &&  *location != oldObj) {
+        // 如果有旧值的话， oldObj 应该 与 location 相等，不等说明被修改了
+        // 解锁
         SideTable::unlockTwo<HaveOld, HaveNew>(oldTable, newTable);
         goto retry;
     }
@@ -294,12 +319,19 @@ storeWeak(id *location, objc_object *newObj)
     // Prevent a deadlock between the weak reference machinery
     // and the +initialize machinery by ensuring that no 
     // weakly-referenced object has an un-+initialized isa.
+    // 阻止 弱引用 机制间 的死锁，
+    // 保证 所有的 weak 修饰的 对象都有 isa
     if (HaveNew  &&  newObj) {
+        
         Class cls = newObj->getIsa();
+        
+        // 新对象的 isa 不为空，且未进行初始化
         if (cls != previouslyInitializedClass  &&  
             !((objc_class *)cls)->isInitialized()) 
         {
+            
             SideTable::unlockTwo<HaveOld, HaveNew>(oldTable, newTable);
+            // 解锁，并进行初始化
             _class_initialize(_class_getNonMetaClass(cls, (id)newObj));
 
             // If this class is finished with +initialize then we're good.
@@ -308,6 +340,7 @@ storeWeak(id *location, objc_object *newObj)
             // then we may proceed but it will appear initializing and 
             // not yet initialized to the check above.
             // Instead set previouslyInitializedClass to recognize it on retry.
+            
             previouslyInitializedClass = cls;
 
             goto retry;
@@ -315,12 +348,15 @@ storeWeak(id *location, objc_object *newObj)
     }
 
     // Clean up old value, if any.
+    // 清除 旧值
     if (HaveOld) {
         weak_unregister_no_lock(&oldTable->weak_table, oldObj, location);
     }
 
     // Assign new value, if any.
+    // 分配新值
     if (HaveNew) {
+        
         newObj = (objc_object *)weak_register_no_lock(&newTable->weak_table, 
                                                       (id)newObj, location, 
                                                       CrashIfDeallocating);
@@ -395,13 +431,19 @@ objc_storeWeakOrNil(id *location, id newObj)
  * @param location Address of __weak ptr. 
  * @param newObj Object ptr. 
  */
+// 初始化一个弱 指针，指针指向 某个 obj 的位置
+// location: 指针所在的地址（栈）
+// newobj: 指针所指对象的地址(堆)
+
 id
 objc_initWeak(id *location, id newObj)
 {
+    // 如果 obj 不存在， 那么 location 就置 nil，并返回 
     if (!newObj) {
         *location = nil;
         return nil;
     }
+    
 
     return storeWeak<false/*old*/, true/*new*/, true/*crash*/>
         (location, (objc_object*)newObj);
@@ -1067,6 +1109,7 @@ public:
 
         page = pageForPointer(token);
         stop = (id *)token;
+        
         if (*stop != POOL_BOUNDARY) {
             if (stop == page->begin()  &&  !page->parent) {
                 // Start of coldest page may correctly not be POOL_BOUNDARY:
@@ -1648,6 +1691,7 @@ objc_clear_deallocating(id obj)
     assert(obj);
 
     if (obj->isTaggedPointer()) return;
+    
     obj->clearDeallocating();
 }
 

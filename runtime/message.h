@@ -68,14 +68,16 @@ OBJC_EXPORT void objc_msgSendSuper(void /* struct objc_super *super, SEL op, ...
 #else
 /** 
  * Sends a message with a simple return value to an instance of a class.
- * 
+ * 向一个类的实例发送一个消息，并返回一个简单值
  * @param self A pointer to the instance of the class that is to receive the message.
+    // 将要接收消息的类实例的指针
  * @param op The selector of the method that handles the message.
+    // 处理消息的选择子
  * @param ... 
  *   A variable argument list containing the arguments to the method.
- * 
+ *  // 包含方法参数的可变参数列表
  * @return The return value of the method.
- * 
+ *  // 方法返回值
  * @note When it encounters a method call, the compiler generates a call to one of the
  *  functions \c objc_msgSend, \c objc_msgSend_stret, \c objc_msgSendSuper, or \c objc_msgSendSuper_stret.
  *  Messages sent to an object’s superclass (using the \c super keyword) are sent using \c objc_msgSendSuper; 

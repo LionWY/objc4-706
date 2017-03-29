@@ -533,14 +533,15 @@ struct class_ro_t {
     uint32_t reserved;
 #endif
 
-    const uint8_t * ivarLayout;
+    const uint8_t * ivarLayout; // 记录哪些是 strong 的 ivar
     
     const char * name;
     method_list_t * baseMethodList;
     protocol_list_t * baseProtocols;
     const ivar_list_t * ivars;
 
-    const uint8_t * weakIvarLayout;
+    const uint8_t * weakIvarLayout; // 记录哪些是 weak 的 ivar
+    
     property_list_t *baseProperties;
 
     method_list_t *baseMethods() const {
@@ -551,15 +552,16 @@ struct class_ro_t {
 
 /***********************************************************************
 * list_array_tt<Element, List>
-* Generic implementation for metadata that can be augmented by categories.
+* Generic implementation for metadata that can be augmented by categoriesÂ.
 *
-* Element is the underlying metadata type (e.g. method_t)
-* List is the metadata's list type (e.g. method_list_t)
+* Element is the underlying metadata type (e.g. method_t) // 元数据类型
+
+* List is the metadata's list type (e.g. method_list_t) // 元数据的列表类型，即，存储元数据的数组
 *
 * A list_array_tt has one of three values:
 * - empty
-* - a pointer to a single list
-* - an array of pointers to lists
+* - a pointer to a single list 指向单个列表的指针
+* - an array of pointers to lists  指向多个列表的指针数组
 *
 * countLists/beginLists/endLists iterate the metadata lists
 * count/begin/end iterate the underlying metadata elements
@@ -691,32 +693,53 @@ class list_array_tt {
             return &list;
         }
     }
+    
+//        memmove(array()->lists + addedCount, array()->lists, 
+//                oldCount * sizeof(array()->lists[0]));
+//        memcpy(array()->lists, addedLists, 
+//               addedCount * sizeof(array()->lists[0]));
+
+//          lists: 3        "123"
+//          addedCount: 4   "4567"
+    
+//          char str[] = "1230000";
+//          memmove (str+4,str+0,3);    // 1230123
+//          memcpy(str+0, "4567", 4);   // 4567123
+//    
 
     void attachLists(List* const * addedLists, uint32_t addedCount) {
         if (addedCount == 0) return;
 
         if (hasArray()) {
+            // 多个元素的旧数组 拼接 多个元素的新数组
             // many lists -> many lists
             uint32_t oldCount = array()->count;
+            // 总数量
             uint32_t newCount = oldCount + addedCount;
+            
+            // 扩大容量，并设置 count 
             setArray((array_t *)realloc(array(), array_t::byteSize(newCount)));
             array()->count = newCount;
+            
             memmove(array()->lists + addedCount, array()->lists, 
                     oldCount * sizeof(array()->lists[0]));
             memcpy(array()->lists, addedLists, 
                    addedCount * sizeof(array()->lists[0]));
         }
         else if (!list  &&  addedCount == 1) {
+            // 0元素 的旧数组 拼接 一个元素的新数组  
             // 0 lists -> 1 list
             list = addedLists[0];
         } 
         else {
+            // 一个元素的旧数组 拼接 多个元素的新数组
             // 1 list -> many lists
             List* oldList = list;
             uint32_t oldCount = oldList ? 1 : 0;
             uint32_t newCount = oldCount + addedCount;
             setArray((array_t *)malloc(array_t::byteSize(newCount)));
             array()->count = newCount;
+            
             if (oldList) array()->lists[addedCount] = oldList;
             memcpy(array()->lists, addedLists, 
                    addedCount * sizeof(array()->lists[0]));
@@ -803,7 +826,7 @@ struct class_rw_t {
     uint32_t flags;
     uint32_t version;
 
-    const class_ro_t *ro;
+    const class_ro_t *ro; // 存储了类在编译期就已经确定的属性、方法、协议
 
     method_array_t methods;
     property_array_t properties;
@@ -1320,21 +1343,22 @@ struct swift_class_t : objc_class {
 
 
 struct category_t {
-    const char *name;
-    classref_t cls;
-    struct method_list_t *instanceMethods;
-    struct method_list_t *classMethods;
-    struct protocol_list_t *protocols;
-    struct property_list_t *instanceProperties;
+    
+    const char *name;   // 类名字
+    classref_t cls;     // 类
+    struct method_list_t *instanceMethods;  // 实例方法列表
+    struct method_list_t *classMethods;     // 类方法列表
+    struct protocol_list_t *protocols;      // 协议列表
+    struct property_list_t *instanceProperties;     // 实例属性列表
     // Fields below this point are not always present on disk.
-    struct property_list_t *_classProperties;
+    struct property_list_t *_classProperties;       // 类属性列表
 
-    method_list_t *methodsForMeta(bool isMeta) {
+    method_list_t *methodsForMeta(bool isMeta) {    // 元类的方法列表
         if (isMeta) return classMethods;
         else return instanceMethods;
     }
 
-    property_list_t *propertiesForMeta(bool isMeta, struct header_info *hi);
+    property_list_t *propertiesForMeta(bool isMeta, struct header_info *hi);    // 元类的 属性列表
 };
 
 struct objc_super2 {

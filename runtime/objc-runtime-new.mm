@@ -615,6 +615,7 @@ prepareMethodLists(Class cls, method_list_t **addedLists, int addedCount,
 // Attach method lists and properties and protocols from categories to a class.
 // Assumes the categories in cats are all loaded and sorted by load order, 
 // oldest categories first.
+// 把所有分类的方法、协议和属性都关联到类
 static void 
 attachCategories(Class cls, category_list *cats, bool flush_caches)
 {
@@ -661,7 +662,9 @@ attachCategories(Class cls, category_list *cats, bool flush_caches)
     auto rw = cls->data();
 
     prepareMethodLists(cls, mlists, mcount, NO, fromBundle);
+    
     rw->methods.attachLists(mlists, mcount);
+    
     free(mlists);
     if (flush_caches  &&  mcount > 0) flushCaches(cls);
 
@@ -678,6 +681,8 @@ attachCategories(Class cls, category_list *cats, bool flush_caches)
 * Fixes up cls's method list, protocol list, and property list.
 * Attaches any outstanding categories.
 * Locking: runtimeLock must be held by the caller
+  修正 class 方法列表，协议列表 和 属性列表
+  并添加 分类
 **********************************************************************/
 static void methodizeClass(Class cls)
 {
@@ -717,6 +722,7 @@ static void methodizeClass(Class cls)
         addMethod(cls, SEL_initialize, (IMP)&objc_noop_imp, "", NO);
     }
 
+    // 添加分类
     // Attach categories.
     category_list *cats = unattachedCategoriesForClass(cls, true /*realizing*/);
     attachCategories(cls, cats, false /*don't flush caches*/);
@@ -751,6 +757,8 @@ static void methodizeClass(Class cls)
 * Attach outstanding categories to an existing class.
 * Fixes up cls's method list, protocol list, and property list.
 * Updates method caches for cls and its subclasses.
+ // 将分类添加进现有类，修复类的方法列表，协议列表和属性列表
+ // 更新类及其子类的方法缓存表
 * Locking: runtimeLock must be held by the caller
 **********************************************************************/
 static void remethodizeClass(Class cls)
@@ -760,9 +768,11 @@ static void remethodizeClass(Class cls)
 
     runtimeLock.assertWriting();
 
+    // 是否元类
     isMeta = cls->isMetaClass();
 
     // Re-methodizing: check for more categories
+    // 重新 匹配方法
     if ((cats = unattachedCategoriesForClass(cls, false/*not realizing*/))) {
         if (PrintConnecting) {
             _objc_inform("CLASS: attaching categories to class '%s' %s", 
@@ -1180,8 +1190,11 @@ static void addRemappedClass(Class oldcls, Class newcls)
 * remapClass
 * Returns the live class pointer for cls, which may be pointing to 
 * a class struct that has been reallocated.
+ // 返回 cls 的活类指针，它可能指向已经被重新分配的类结构体
 * Returns nil if cls is ignored because of weak linking.
+ // 如果由于弱链接而忽略 cls， 就返回 nil
 * Locking: runtimeLock must be read- or write-locked by the caller
+ // 锁定状态： runtimeLock 必须由调用者读写锁定
 **********************************************************************/
 static Class remapClass(Class cls)
 {
@@ -1199,6 +1212,7 @@ static Class remapClass(Class cls)
     }
 }
 
+// 返回类 指针
 static Class remapClass(classref_t cls)
 {
     return remapClass((Class)cls);
@@ -1690,6 +1704,7 @@ static void reconcileInstanceVariables(Class cls, Class supercls, const class_ro
 * Performs first-time initialization on class cls, 
 * including allocating its read-write data.
 * Returns the real class structure for the class. 
+ // 对类进行第一次初始化，包括 读写空间，返回真正的类结构
 * Locking: runtimeLock must be write-locked by the caller
 **********************************************************************/
 static Class realizeClass(Class cls)
@@ -1703,12 +1718,16 @@ static Class realizeClass(Class cls)
     bool isMeta;
 
     if (!cls) return nil;
+    
     if (cls->isRealized()) return cls;
+    
     assert(cls == remapClass(cls));
 
     // fixme verify class is not in an un-dlopened part of the shared cache?
-
+    
+    // ro 初始化
     ro = (const class_ro_t *)cls->data();
+    
     if (ro->flags & RO_FUTURE) {
         // This was a future class. rw data is already allocated.
         rw = cls->data();
@@ -2003,7 +2022,7 @@ map_2_images(unsigned count, const char * const paths[],
 /***********************************************************************
 * load_images
 * Process +load in the given images which are being mapped in by dyld.
-*
+* 执行 dyld 提供的并且已被 map_images 处理后的 image 中的 +load 
 * Locking: write-locks runtimeLock and loadMethodLock
 **********************************************************************/
 extern bool hasLoadMethods(const headerType *mhdr);
@@ -2013,17 +2032,21 @@ void
 load_images(const char *path __unused, const struct mach_header *mh)
 {
     // Return without taking locks if there are no +load methods here.
+    // 如果没有 load 方法，直接返回，
     if (!hasLoadMethods((const headerType *)mh)) return;
 
     recursive_mutex_locker_t lock(loadMethodLock);
 
     // Discover load methods
+    // 收集 load 方法，为下面调用做准备
     {
         rwlock_writer_t lock2(runtimeLock);
+        // 准备所有的 load 方法
         prepare_load_methods((const headerType *)mh);
     }
 
     // Call +load methods (without runtimeLock - re-entrant)
+    // 调用 load 方法
     call_load_methods();
 }
 
@@ -2531,12 +2554,16 @@ void _read_images(header_info **hList, uint32_t hCount, int totalClasses, int un
 
     // Discover categories. 
     for (EACH_HEADER) {
+        // 分类列表
         category_t **catlist = 
             _getObjc2CategoryList(hi, &count);
+        
+        // 是否有分类属性
         bool hasClassProperties = hi->info()->hasCategoryClassProperties();
 
         for (i = 0; i < count; i++) {
             category_t *cat = catlist[i];
+            // 类指针
             Class cls = remapClass(cat->cls);
 
             if (!cls) {
@@ -2555,12 +2582,19 @@ void _read_images(header_info **hList, uint32_t hCount, int totalClasses, int un
             // First, register the category with its target class. 
             // Then, rebuild the class's method lists (etc) if 
             // the class is realized. 
+            
+            // 如果类 已经加载，处理分类，
+            // 首先 把分类 关联到类，然后 重建 类的方法列表 
             bool classExists = NO;
+            // 实例方法，实例属性，协议
             if (cat->instanceMethods ||  cat->protocols  
                 ||  cat->instanceProperties) 
             {
+                // 添加映射
                 addUnattachedCategoryForClass(cat, cls, hi);
+                
                 if (cls->isRealized()) {
+                    // 添加方法
                     remethodizeClass(cls);
                     classExists = YES;
                 }
@@ -2570,10 +2604,12 @@ void _read_images(header_info **hList, uint32_t hCount, int totalClasses, int un
                                  classExists ? "on existing class" : "");
                 }
             }
-
+            
+            // 类方法，协议，类属性
             if (cat->classMethods  ||  cat->protocols  
                 ||  (hasClassProperties && cat->_classProperties)) 
             {
+                // 添加到元类里面
                 addUnattachedCategoryForClass(cat, cls->ISA(), hi);
                 if (cls->ISA()->isRealized()) {
                     remethodizeClass(cls->ISA());
@@ -2669,21 +2705,26 @@ void _read_images(header_info **hList, uint32_t hCount, int totalClasses, int un
 **********************************************************************/
 // Recursively schedule +load for cls and any un-+load-ed superclasses.
 // cls must already be connected.
+// 递归方法， 调用类的 load 方法，包括父类
 static void schedule_class_load(Class cls)
 {
     if (!cls) return;
     assert(cls->isRealized());  // _read_images should realize
 
+    // A. 判断 类 的 load 方法 是否被调用
     if (cls->data()->flags & RW_LOADED) return;
 
     // Ensure superclass-first ordering
     schedule_class_load(cls->superclass);
 
+    // 把 含有 load 方法的类 添加到 全局的 loadable_classes
     add_class_to_loadable_list(cls);
+    // 添加标记，对应 A
     cls->setInfo(RW_LOADED); 
 }
 
 // Quick scan for +load methods that doesn't take a lock.
+// 快速查询 是否含有未上锁的 load 方法
 bool hasLoadMethods(const headerType *mhdr)
 {
     size_t count;
@@ -2698,19 +2739,29 @@ void prepare_load_methods(const headerType *mhdr)
 
     runtimeLock.assertWriting();
 
+    // 收集所有类的列表
     classref_t *classlist = 
         _getObjc2NonlazyClassList(mhdr, &count);
+    
     for (i = 0; i < count; i++) {
+        // 收集当前类和父类的 load 方法，父类优先
+        
         schedule_class_load(remapClass(classlist[i]));
     }
 
+    // 获取所有的分类
     category_t **categorylist = _getObjc2NonlazyCategoryList(mhdr, &count);
     for (i = 0; i < count; i++) {
         category_t *cat = categorylist[i];
+        // 获取到分类对应的类的指针
         Class cls = remapClass(cat->cls);
+        // 若链接返回 nil， 如果是 弱链接，就跳过
         if (!cls) continue;  // category for ignored weak-linked class
+        
+        // 对类进行第一次初始化，包括 读写空间，返回真正的类结构
         realizeClass(cls);
         assert(cls->ISA()->isRealized());
+        // 把 分类加入到一个全局列表中
         add_category_to_loadable_list(cat);
     }
 }
@@ -4409,6 +4460,7 @@ static method_t *findMethodInSortedMethodList(SEL key, const method_list_t *list
 static method_t *search_method_list(const method_list_t *mlist, SEL sel)
 {
     int methodListIsFixedUp = mlist->isFixedUp();
+    
     int methodListHasExpectedSize = mlist->entsize() == sizeof(method_t);
     
     if (__builtin_expect(methodListIsFixedUp && methodListHasExpectedSize, 1)) {
@@ -4443,6 +4495,7 @@ getMethodNoSuper_nolock(Class cls, SEL sel)
     // fixme nil cls? 
     // fixme nil sel?
 
+    // 
     for (auto mlists = cls->data()->methods.beginLists(), 
               end = cls->data()->methods.endLists(); 
          mlists != end;
@@ -4543,6 +4596,7 @@ log_and_fill_cache(Class cls, IMP imp, SEL sel, id receiver, Class implementer)
 /***********************************************************************
 * _class_lookupMethodAndLoadCache.
 * Method lookup for dispatchers ONLY. OTHER CODE SHOULD USE lookUpImp().
+ // 仅提供 dispatchers 调用， 其他代码应该使用 lookUpImp()
 * This lookup avoids optimistic cache scan because the dispatcher 
 * already tried that.
 **********************************************************************/
@@ -4573,14 +4627,17 @@ IMP lookUpImpOrForward(Class cls, SEL sel, id inst,
     Method meth;
     bool triedResolver = NO;
 
+    // 解锁状态
     runtimeLock.assertUnlocked();
 
     // Optimistic cache lookup
+    // 如果有缓存，就在缓存中查找，并返回
     if (cache) {
         imp = cache_getImp(cls, sel);
         if (imp) return imp;
     }
 
+    // 初始化
     if (!cls->isRealized()) {
         rwlock_writer_t lock(runtimeLock);
         realizeClass(cls);
@@ -4598,25 +4655,27 @@ IMP lookUpImpOrForward(Class cls, SEL sel, id inst,
     // with respect to method addition. Otherwise, a category could 
     // be added but ignored indefinitely because the cache was re-filled 
     // with the old value after the cache flush on behalf of the category.
+    // 加锁，保证 方法查找 和 缓存填充 的原子性， 否则，可能会有类别添加方法导致缓存冲洗
  retry:
     runtimeLock.read();
 
     // Try this class's cache.
-
+    // 尝试缓存查找
     imp = cache_getImp(cls, sel);
     if (imp) goto done;
 
     // Try this class's method lists.
-
+    // 尝试 当前类的 方法列表
     meth = getMethodNoSuper_nolock(cls, sel);
     if (meth) {
+        // 添加缓存
         log_and_fill_cache(cls, meth->imp, sel, inst, cls);
         imp = meth->imp;
         goto done;
     }
 
     // Try superclass caches and method lists.
-
+    // 尝试父类 的缓存 和方法 列表
     curClass = cls;
     while ((curClass = curClass->superclass)) {
         // Superclass cache.
@@ -4645,9 +4704,10 @@ IMP lookUpImpOrForward(Class cls, SEL sel, id inst,
     }
 
     // No implementation found. Try method resolver once.
-
+    // 都没有找到 方法实现， 尝试 方法决议 一次
     if (resolver  &&  !triedResolver) {
         runtimeLock.unlockRead();
+        
         _class_resolveMethod(cls, sel, inst);
         // Don't cache the result; we don't hold the lock so it may have 
         // changed already. Re-do the search from scratch instead.
@@ -4657,7 +4717,7 @@ IMP lookUpImpOrForward(Class cls, SEL sel, id inst,
 
     // No implementation found, and method resolver didn't help. 
     // Use forwarding.
-
+    // 没找到方法实现，决议也没什么用， 就使用转发，并缓存
     imp = (IMP)_objc_msgForward_impcache;
     cache_fill(cls, sel, imp, inst);
 

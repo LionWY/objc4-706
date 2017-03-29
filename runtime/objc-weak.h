@@ -116,6 +116,7 @@ struct weak_entry_t {
  * The global weak references table. Stores object ids as keys,
  * and weak_entry_t structs as their values.
  */
+// 而在 weak_table 中，其成员 weak_entry 会将传入对象的地址加以封装起来，并且其中也有访问全局弱引用表的入口
 struct weak_table_t {
     weak_entry_t *weak_entries;
     size_t    num_entries;

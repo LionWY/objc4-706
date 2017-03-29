@@ -349,6 +349,7 @@ weak_unregister_no_lock(weak_table_t *weak_table, id referent_id,
                         id *referrer_id)
 {
     objc_object *referent = (objc_object *)referent_id;
+    
     objc_object **referrer = (objc_object **)referrer_id;
 
     weak_entry_t *entry;
@@ -356,7 +357,10 @@ weak_unregister_no_lock(weak_table_t *weak_table, id referent_id,
     if (!referent) return;
 
     if ((entry = weak_entry_for_referent(weak_table, referent))) {
+        
+        // 把 地址从入口移除
         remove_referrer(entry, referrer);
+        
         bool empty = true;
         if (entry->out_of_line()  &&  entry->num_refs != 0) {
             empty = false;
@@ -391,13 +395,17 @@ id
 weak_register_no_lock(weak_table_t *weak_table, id referent_id, 
                       id *referrer_id, bool crashIfDeallocating)
 {
-    objc_object *referent = (objc_object *)referent_id;
+    // 对象
+    objc_object *referent = (objc_object *)referent_id; 
+    // 地址
     objc_object **referrer = (objc_object **)referrer_id;
 
+    // 对象不存在，或者 是 tagged 指针
     if (!referent  ||  referent->isTaggedPointer()) return referent_id;
 
     // ensure that the referenced object is viable
     bool deallocating;
+    // 
     if (!referent->ISA()->hasCustomRR()) {
         deallocating = referent->rootIsDeallocating();
     }
@@ -406,6 +414,7 @@ weak_register_no_lock(weak_table_t *weak_table, id referent_id,
             (BOOL(*)(objc_object *, SEL))
             object_getMethodImplementation((id)referent, 
                                            SEL_allowsWeakReference);
+        
         if ((IMP)allowsWeakReference == _objc_msgForward) {
             return nil;
         }
@@ -425,8 +434,11 @@ weak_register_no_lock(weak_table_t *weak_table, id referent_id,
     }
 
     // now remember it and where it is being stored
+    // weak 引用表 入口
     weak_entry_t *entry;
+    
     if ((entry = weak_entry_for_referent(weak_table, referent))) {
+        // entry 把地址添加进去
         append_referrer(entry, referrer);
     } 
     else {

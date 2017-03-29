@@ -616,12 +616,15 @@ void _objc_init(void)
     initialized = true;
     
     // fixme defer initialization until an objc-using image is found?
+    // 环境变量初始化
     environ_init();
     tls_init();
     static_init();
     lock_init();
+    // 初始化libobjc的异常处理系统
     exception_init();
 
+    // 
     _dyld_objc_notify_register(&map_2_images, load_images, unmap_image);
 }
 

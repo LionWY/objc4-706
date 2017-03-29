@@ -641,6 +641,7 @@ static void _class_resolveInstanceMethod(Class cls, SEL sel, id inst)
 
     // Cache the result (good or bad) so the resolver doesn't fire next time.
     // +resolveInstanceMethod adds to self a.k.a. cls
+    // 缓存结果，避免下次再次开启决议
     IMP imp = lookUpImpOrNil(cls, sel, inst, 
                              NO/*initialize*/, YES/*cache*/, NO/*resolver*/);
 

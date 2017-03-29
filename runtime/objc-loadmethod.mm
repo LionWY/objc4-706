@@ -61,11 +61,14 @@ static int loadable_categories_allocated = 0;
 **********************************************************************/
 void add_class_to_loadable_list(Class cls)
 {
+    // 方法指针
     IMP method;
 
+    
     loadMethodLock.assertLocked();
-
+    // 方法内部会根据 方法名字， "load"， 判断是否 load 方法，并返回
     method = cls->getLoadMethod();
+    
     if (!method) return;  // Don't bother if cls has no +load method
     
     if (PrintLoading) {
@@ -188,19 +191,24 @@ static void call_class_loads(void)
     // Detach current loadable list.
     struct loadable_class *classes = loadable_classes;
     int used = loadable_classes_used;
+    // 重置静态存储数组对象
     loadable_classes = nil;
     loadable_classes_allocated = 0;
     loadable_classes_used = 0;
     
+    // 方法依次执行
     // Call all +loads for the detached list.
     for (i = 0; i < used; i++) {
+        
         Class cls = classes[i].cls;
+        // 方法对应的 IMP
         load_method_t load_method = (load_method_t)classes[i].method;
         if (!cls) continue; 
 
         if (PrintLoading) {
             _objc_inform("LOAD: +[%s load]\n", cls->nameForLogging());
         }
+        // 调用方法
         (*load_method)(cls, SEL_load);
     }
     
@@ -227,6 +235,7 @@ static bool call_category_loads(void)
     bool new_categories_added = NO;
     
     // Detach current loadable list.
+    // 1. 分离并获取当前的分类列表 cats
     struct loadable_category *cats = loadable_categories;
     int used = loadable_categories_used;
     int allocated = loadable_categories_allocated;
@@ -235,6 +244,7 @@ static bool call_category_loads(void)
     loadable_categories_used = 0;
 
     // Call all +loads for the detached list.
+    // 2. for 循环 进行调用 load 方法，执行完毕后，把分类置空
     for (i = 0; i < used; i++) {
         Category cat = cats[i].cat;
         load_method_t load_method = (load_method_t)cats[i].method;
@@ -254,6 +264,7 @@ static bool call_category_loads(void)
     }
 
     // Compact detached list (order-preserving)
+    // 3. 将加载过的分类方法移除 分离列表，保留未被加载过的 分类方法
     shift = 0;
     for (i = 0; i < used; i++) {
         if (cats[i].cat) {
@@ -265,7 +276,10 @@ static bool call_category_loads(void)
     used -= shift;
 
     // Copy any new +load candidates from the new list to the detached list.
+    // 运行过程中是否有新添加的分类方法
     new_categories_added = (loadable_categories_used > 0);
+    
+    // 4. 如果有，先存储在 分离列表 cats 
     for (i = 0; i < loadable_categories_used; i++) {
         if (used == allocated) {
             allocated = allocated*2 + 16;
@@ -277,10 +291,12 @@ static bool call_category_loads(void)
     }
 
     // Destroy the new list.
+    // 释放清空全局列表，以便后面重新赋值
     if (loadable_categories) free(loadable_categories);
 
     // Reattach the (now augmented) detached list. 
     // But if there's nothing left to load, destroy the list.
+    // 5. 是否存在有新列表，并赋值给全局静态存储变量
     if (used) {
         loadable_categories = cats;
         loadable_categories_used = used;
@@ -336,6 +352,8 @@ static bool call_category_loads(void)
 **********************************************************************/
 void call_load_methods(void)
 {
+    // loading 设置为全局静态变量，保证只初始化一次，
+    // 一旦执行一次， loading 即为 YES，
     static bool loading = NO;
     bool more_categories;
 
@@ -345,6 +363,7 @@ void call_load_methods(void)
     if (loading) return;
     loading = YES;
 
+    // 创建自动释放池，在自动释放池中进行方法调用
     void *pool = objc_autoreleasePoolPush();
 
     do {
